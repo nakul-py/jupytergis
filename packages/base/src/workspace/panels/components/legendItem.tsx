@@ -1,9 +1,15 @@
 import { IJupyterGISModel } from '@jupytergis/schema';
 import React, { useEffect, useState } from 'react';
 
-import { findExprNode } from '@/src/features/layers/symbology/colorRampUtils';
+import { GeoTiffClassifications } from '@/src/features/layers/symbology/classificationModes';
+import {
+  ColorRampName,
+  findExprNode,
+  getColorMap,
+} from '@/src/features/layers/symbology/colorRampUtils';
 import { useGetSymbology } from '@/src/features/layers/symbology/hooks/useGetSymbology';
 import { buildVectorFlatStyle } from '@/src/features/layers/symbology/styleBuilder';
+import { Utils } from '@/src/features/layers/symbology/symbologyUtils';
 
 export const LegendItem: React.FC<{
   layerId: string;
@@ -336,6 +342,162 @@ export const LegendItem: React.FC<{
             {reversed && (
               <span style={{ fontWeight: 'bold' }}>Reversed ramp</span>
             )}
+          </div>
+        </div>,
+      );
+      return;
+    }
+
+    if (renderType === 'Singleband Pseudocolor') {
+      const colorExpr = symbology.color;
+      const interpolation = state?.interpolation ?? 'linear';
+      const band = state?.band ?? 1;
+      const mode = state?.mode ?? 'equal interval';
+      const shouldShowStops = mode === 'equal interval';
+
+      let stops: { value: number; color: string }[] = [];
+
+      if (!stops.length && shouldShowStops) {
+        const layer = model.getLayer(layerId);
+        const sourceId = layer?.parameters?.source;
+        const source = sourceId ? model.getSource(sourceId) : undefined;
+        const sourceInfo = source?.parameters?.urls?.[0];
+
+        const min = Number(sourceInfo?.min);
+        const max = Number(sourceInfo?.max);
+
+        if (Number.isFinite(min) && Number.isFinite(max)) {
+          const nClasses = Number(state?.nClasses ?? 9);
+
+          const classifiedStops =
+            GeoTiffClassifications.classifyEqualIntervalBreaks(
+              nClasses,
+              min,
+              max,
+              interpolation,
+            );
+
+          const colorRamp = getColorMap(
+            (state?.colorRamp ?? 'viridis') as ColorRampName,
+          );
+
+          if (colorRamp && classifiedStops.length) {
+            stops = Utils.getValueColorPairs(
+              classifiedStops,
+              colorRamp,
+              nClasses,
+              state?.reverseRamp ?? false,
+            ).map(row => ({
+              value: Number(row.stop),
+              color: Array.isArray(row.output)
+                ? `rgba(${row.output[0]},${row.output[1]},${row.output[2]},${row.output[3]})`
+                : String(row.output),
+            }));
+          }
+        }
+      }
+
+      const cats = parseCaseCategories(colorExpr);
+
+      if (!stops.length) {
+        stops = parseColorStops(colorExpr);
+
+        if (cats.length) {
+          stops = cats.map(c => ({
+            value: Number(c.category),
+            color: c.color,
+          }));
+        }
+      }
+
+      stops = stops.filter(s => !s.color.endsWith(',0)')); // Filter out transparent colors
+
+      if (!stops.length) {
+        setContent(
+          <p style={{ fontSize: '0.8em' }}>No pseudocolor symbology</p>,
+        );
+        return;
+      }
+
+      const min = stops[0].value;
+      const max = stops[stops.length - 1].value;
+
+      const getStopPct = (value: number) => {
+        if (min === max) {
+          return 0;
+        }
+        return ((value - min) / (max - min)) * 100;
+      };
+
+      const segments = stops
+        .map(s => `${s.color} ${getStopPct(s.value)}%`)
+        .join(', ');
+
+      const gradient = `linear-gradient(to right, ${segments})`;
+
+      setContent(
+        <div style={{ padding: 6, width: '90%' }}>
+          <div style={{ fontSize: '1em', marginBottom: 20 }}>
+            <strong>Band {band}</strong>
+          </div>
+
+          <div
+            style={{
+              position: 'relative',
+              height: 12,
+              background: gradient,
+              border: '1px solid #ccc',
+              borderRadius: 3,
+              marginBottom: 20,
+              marginTop: 10,
+            }}
+          >
+            {shouldShowStops &&
+              stops.map((s, i) => {
+                const left = getStopPct(s.value);
+                const up = i % 2 === 0;
+
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      position: 'absolute',
+                      left: `${left}%`,
+                      transform: 'translateX(-50%)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 1,
+                        height: 8,
+                        background: '#333',
+                        margin: '0 auto',
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: up ? -18 : 12,
+                        fontSize: '0.7em',
+                        whiteSpace: 'nowrap',
+                        marginTop: up ? 0 : 4,
+                        marginLeft: -8,
+                      }}
+                    >
+                      {s.value.toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+
+          <div
+            style={{ fontWeight: 'bold', fontSize: '0.75em', opacity: 0.75 }}
+          >
+            {interpolation.charAt(0).toUpperCase() + interpolation.slice(1)}{' '}
+            interpolation
+            {state?.reverseRamp ? ' · Reversed ramp' : ''}
           </div>
         </div>,
       );
