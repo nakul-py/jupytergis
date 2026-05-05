@@ -1874,6 +1874,48 @@ export function addCommands(
     },
   });
 
+  const SELECTION_DEPENDENT_COMMANDS = [
+    CommandIDs.identify,
+    CommandIDs.symbology,
+    CommandIDs.zoomToLayer,
+    CommandIDs.toggleConsole,
+    CommandIDs.renameSelected,
+    CommandIDs.removeSelected,
+    CommandIDs.addStorySegment,
+    CommandIDs.downloadGeoJSON,
+    CommandIDs.duplicateSelected,
+    CommandIDs.toggleDrawFeatures,
+    CommandIDs.temporalController,
+    CommandIDs.createStorySegmentFromLayer,
+    CommandIDs.toggleStoryPresentationMode,
+  ];
+
+  const notifySelectionCommands = () => {
+    SELECTION_DEPENDENT_COMMANDS.forEach(command => {
+      commands.notifyCommandChanged(command);
+    });
+  };
+
+  let currentAwarenessCleanup: (() => void) | null = null;
+
+  tracker.currentChanged.connect((_, widget) => {
+    currentAwarenessCleanup?.();
+    currentAwarenessCleanup = null;
+
+    if (!widget) {
+      notifySelectionCommands();
+      return;
+    }
+
+    const awareness = widget.model.sharedModel.awareness;
+    const onAwarenessChange = () => notifySelectionCommands();
+    awareness.on('change', onAwarenessChange);
+    currentAwarenessCleanup = () => awareness.off('change', onAwarenessChange);
+
+    // Notify that the widget may already have a selected layer
+    notifySelectionCommands();
+  });
+
   loadKeybindings(commands, keybindings);
 }
 
