@@ -2,7 +2,7 @@ import { IGeoTiffLayer } from '@jupytergis/schema';
 import { Button } from '@jupyterlab/ui-components';
 import { ReadonlyJSONObject, UUID } from '@lumino/coreutils';
 import { ExpressionValue } from 'ol/expr/expression';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { GeoTiffClassifications } from '@/src/features/layers/symbology/classificationModes';
 import ColorRampControls, {
@@ -81,6 +81,7 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
   const colorRampOptionsRef = useLatest(colorRampOptions);
   const selectedBandRef = useLatest(selectedBand);
   const stopsAlteredRef = useLatest(stopsAltered);
+  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
     populateOptions();
@@ -91,17 +92,19 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
       return;
     }
 
-    if (params.symbologyState?.stopsOverride) {
+    if (isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
       return;
     }
 
-    const state = params.symbologyState;
-
+    setStopsAltered(false);
+    const { mode, nClasses, colorRamp, reverseRamp } =
+      getClassificationParams();
     buildColorInfoFromClassification(
-      (state?.mode ?? 'equal interval') as ClassificationMode,
-      Number(state?.nClasses ?? 9),
-      (state?.colorRamp ?? 'viridis') as ColorRampName,
-      state?.reverseRamp ?? false,
+      mode,
+      nClasses,
+      colorRamp,
+      reverseRamp,
       () => undefined,
     );
   }, [bandRows, selectedBand]);
@@ -113,18 +116,35 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
 
     setLayerState(layerState);
 
-    const band = params.symbologyState?.band ?? 1;
-    const interpolation = params.symbologyState?.interpolation ?? 'linear';
+    const state = params.symbologyState;
+    const { mode, nClasses, colorRamp, reverseRamp } =
+      getClassificationParams();
 
-    setSelectedBand(band);
-    setSelectedFunction(interpolation);
+    setSelectedBand(state?.band ?? 1);
+    setSelectedFunction(state?.interpolation ?? 'linear');
+    setColorRampOptions({
+      selectedRamp: colorRamp,
+      numberOfShades: nClasses,
+      selectedMode: mode,
+      reverseRamp,
+    });
 
-    if (params.symbologyState?.stopsOverride) {
-      setStopRows(params.symbologyState.stopsOverride as IStopRow[]);
+    if (state?.stopsOverride && state?.stopsOverride?.length > 0) {
+      setStopRows(state.stopsOverride as IStopRow[]);
       setStopsAltered(true);
     } else {
       buildColorInfo();
     }
+  };
+
+  const getClassificationParams = () => {
+    const state = params.symbologyState;
+    return {
+      mode: (state?.mode ?? 'equal interval') as ClassificationMode,
+      nClasses: Number(state?.nClasses ?? 9),
+      colorRamp: (state?.colorRamp ?? 'viridis') as ColorRampName,
+      reverseRamp: state?.reverseRamp ?? false,
+    };
   };
 
   const buildColorInfo = () => {
@@ -274,7 +294,7 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
           : undefined,
       mode: colorRampOptionsRef.current?.selectedMode,
       reverseRamp: colorRampOptionsRef.current?.reverseRamp,
-      ...(stopsAlteredRef.current
+      ...(stopsAlteredRef.current && stopRowsRef.current.length > 0
         ? { stopsOverride: stopRowsRef.current }
         : {}),
     } as IGeoTiffLayer['symbologyState'];
@@ -314,13 +334,13 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
 
   const addStopRow = () => {
     setStopsAltered(true);
-    setStopRows([
+    setStopRows(rows => [
       {
         id: UUID.uuid4(),
         stop: 0,
         output: [0, 0, 0, 1],
       },
-      ...stopRows,
+      ...rows,
     ]);
   };
 
@@ -332,7 +352,9 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
     setStopRows(newFilters);
   };
 
-  const updateStopRows = (rows: IStopRow[]) => {
+  const updateStopRows: React.Dispatch<
+    React.SetStateAction<IStopRow[]>
+  > = rows => {
     setStopsAltered(true);
     setStopRows(rows);
   };
