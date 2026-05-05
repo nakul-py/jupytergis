@@ -442,8 +442,9 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
   };
 
   const unscaleValue = (value: number | string, isQuantile: boolean) => {
-    if (typeof value !== 'number') {
-      throw new Error('unscaleValue expects a number');
+    const num = Number(value);
+    if (isNaN(num)) {
+      throw new Error(`unscaleValue expects a number, got: ${value}`);
     }
 
     const currentBand = bandRowsRef.current[selectedBand - 1];
@@ -451,7 +452,10 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
     const min = isQuantile ? 1 : currentBand.stats.minimum;
     const max = isQuantile ? 65535 : currentBand.stats.maximum;
 
-    return (value * (1 - 0) - min * (1 - 0)) / (max - min);
+    if (max === min) {
+      return 0;
+    }
+    return (num - min) / (max - min);
   };
 
   return (
