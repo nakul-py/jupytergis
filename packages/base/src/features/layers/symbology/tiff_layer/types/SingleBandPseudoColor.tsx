@@ -1,8 +1,8 @@
 import { IGeoTiffLayer } from '@jupytergis/schema';
 import { Button } from '@jupyterlab/ui-components';
-import { ReadonlyJSONObject, UUID } from '@lumino/coreutils';
+import { UUID } from '@lumino/coreutils';
 import { ExpressionValue } from 'ol/expr/expression';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { GeoTiffClassifications } from '@/src/features/layers/symbology/classificationModes';
 import ColorRampControls, {
@@ -23,7 +23,6 @@ import {
 import BandRow from '@/src/features/layers/symbology/tiff_layer/components/BandRow';
 import { LoadingOverlay } from '@/src/shared/components/loading';
 import { useLatest } from '@/src/shared/hooks/useLatest';
-import { GlobalStateDbManager } from '@/src/shared/store';
 import { ClassificationMode } from '@/src/types';
 import { ColorRampName, getColorMap } from '../../colorRampUtils';
 import { useEffectiveSymbologyParams } from '../../hooks/useEffectiveSymbologyParams';
@@ -61,11 +60,8 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
     'quantile',
   ] as const satisfies ClassificationMode[];
 
-  const stateDb = GlobalStateDbManager.getInstance().getStateDb();
-
   const { bandRows, setBandRows, loading } = useGetBandInfo(model, layer);
 
-  const [layerState, setLayerState] = useState<ReadonlyJSONObject>();
   const [selectedBand, setSelectedBand] = useState(1);
   const [stopRows, setStopRows] = useState<IStopRow[]>([]);
   const [selectedFunction, setSelectedFunction] =
@@ -81,7 +77,6 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
   const colorRampOptionsRef = useLatest(colorRampOptions);
   const selectedBandRef = useLatest(selectedBand);
   const stopsAlteredRef = useLatest(stopsAltered);
-  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
     populateOptions();
@@ -92,12 +87,10 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
       return;
     }
 
-    if (isInitialLoadRef.current) {
-      isInitialLoadRef.current = false;
+    if (stopsAlteredRef.current) {
       return;
     }
 
-    setStopsAltered(false);
     const { mode, nClasses, colorRamp, reverseRamp } =
       getClassificationParams();
     buildColorInfoFromClassification(
@@ -109,13 +102,7 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
     );
   }, [bandRows, selectedBand]);
 
-  const populateOptions = async () => {
-    const layerState = (await stateDb?.fetch(
-      `jupytergis:${layerId}`,
-    )) as ReadonlyJSONObject;
-
-    setLayerState(layerState);
-
+  const populateOptions = () => {
     const state = params.symbologyState;
     const { mode, nClasses, colorRamp, reverseRamp } =
       getClassificationParams();
@@ -129,11 +116,9 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
       reverseRamp,
     });
 
-    if (state?.stopsOverride && state?.stopsOverride?.length > 0) {
+    if (state?.stopsOverride?.length) {
       setStopRows(state.stopsOverride as IStopRow[]);
       setStopsAltered(true);
-    } else {
-      buildColorInfo();
     }
   };
 
@@ -145,72 +130,6 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
       colorRamp: (state?.colorRamp ?? 'viridis') as ColorRampName,
       reverseRamp: state?.reverseRamp ?? false,
     };
-  };
-
-  const buildColorInfo = () => {
-    // This it to parse a color object on the layer
-    if (!params.color || !layerState) {
-      return;
-    }
-
-    const color = params.color;
-
-    // If color is a string we don't need to parse
-    // Otherwise color expression should be an array (e.g. ['interpolate', ...] or ['case', ...])
-    if (!Array.isArray(color)) {
-      return;
-    }
-
-    // ! wtf ? dont use statedb just read from the file??
-    const isQuantile = (layerState.selectedMode as string) === 'quantile';
-
-    const valueColorPairs: IStopRow[] = [];
-
-    // Color[0] is the operator used for the color expression
-    switch (color[0]) {
-      case 'interpolate': {
-        // First element is interpolate for linear selection
-        // Second element is type of interpolation (ie linear)
-        // Third is input value that stop values are compared with
-        // Fourth and Fifth are the transparent value for NoData values
-        // Sixth and on is value:color pairs
-        for (let i = 5; i < color.length; i += 2) {
-          const obj: IStopRow = {
-            id: UUID.uuid4(),
-            stop: scaleValue(Number(color[i]), isQuantile),
-            output: color[i + 1] as IStopRow['output'],
-          };
-          valueColorPairs.push(obj);
-        }
-        break;
-      }
-      case 'case': {
-        // First element is case for discrete and exact selections
-        // Second element is the condition for NoData values
-        // Third element is transparent
-        // Fourth is the condition for actual values
-        // Within that, first is logical operator, second is band, third is value
-        // Fifth is color
-        // Last element is fallback value
-        for (let i = 3; i < color.length - 1; i += 2) {
-          const stopVal = Number(
-            Array.isArray(color[i])
-              ? (color[i] as (string | number)[])[2]
-              : color[i],
-          );
-          const obj: IStopRow = {
-            id: UUID.uuid4(),
-            stop: scaleValue(stopVal, isQuantile),
-            output: color[i + 1] as IStopRow['output'],
-          };
-          valueColorPairs.push(obj);
-        }
-        break;
-      }
-    }
-
-    setStopRows(valueColorPairs);
-    setStopsAltered(false);
   };
 
   const handleOk = () => {
@@ -428,19 +347,6 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
     setStopsAltered(false);
   };
 
-  const scaleValue = (bandValue: number, isQuantile: boolean) => {
-    const currentBand = bandRows[selectedBand - 1];
-
-    if (!currentBand) {
-      return bandValue;
-    }
-
-    const min = isQuantile ? 1 : currentBand.stats.minimum;
-    const max = isQuantile ? 65535 : currentBand.stats.maximum;
-
-    return (bandValue * (max - min)) / (1 - 0) + min;
-  };
-
   const unscaleValue = (value: number | string, isQuantile: boolean) => {
     const num = Number(value);
     if (isNaN(num)) {
@@ -485,7 +391,7 @@ const SingleBandPseudoColor: React.FC<ISymbologyDialogProps> = ({
               setSelectedFunction(event.target.value as InterpolationType);
             }}
           >
-            {functions.map((func, funcIndex) => (
+            {functions.map(func => (
               <option
                 key={func}
                 value={func}
