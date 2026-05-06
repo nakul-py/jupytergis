@@ -1874,26 +1874,14 @@ export function addCommands(
     },
   });
 
-  const SELECTION_DEPENDENT_COMMANDS = [
-    CommandIDs.identify,
-    CommandIDs.symbology,
-    CommandIDs.zoomToLayer,
-    CommandIDs.toggleConsole,
-    CommandIDs.renameSelected,
-    CommandIDs.removeSelected,
-    CommandIDs.addStorySegment,
-    CommandIDs.downloadGeoJSON,
-    CommandIDs.duplicateSelected,
-    CommandIDs.toggleDrawFeatures,
-    CommandIDs.temporalController,
-    CommandIDs.createStorySegmentFromLayer,
-    CommandIDs.toggleStoryPresentationMode,
-  ];
-
   const notifySelectionCommands = () => {
-    SELECTION_DEPENDENT_COMMANDS.forEach(command => {
-      commands.notifyCommandChanged(command);
-    });
+    for (const command of Object.values(CommandIDs)) {
+      try {
+        commands.notifyCommandChanged(command);
+      } catch (_) {
+        // Do Continue if command is not registered
+      }
+    }
   };
 
   let currentAwarenessCleanup: (() => void) | null = null;
